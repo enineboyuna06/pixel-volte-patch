@@ -1,0 +1,85 @@
+name: Build signed fork release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix-video-calls-boolean
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Install hidden API android.jar
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Reginer/aosp-android-jar/raw/main/android-36/android.jar \
+            --output "$ANDROID_HOME/platforms/android-36/android.jar"
+
+      - name: Build release APK
+        run: bash ./gradlew :app:assembleRelease
+
+      - name: Align APK
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -f -p 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            "$RUNNER_TEMP/app-aligned.apk"
+
+      - name: Sign APK
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_B64:?Missing RELEASE_KEYSTORE_B64}"
+          : "${KEY_ALIAS:?Missing RELEASE_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing RELEASE_KEY_PASSWORD}"
+
+          umask 077
+          KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$KEYSTORE_PATH"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_PATH"
+
+          mkdir -p release-output
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEY_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out release-output/Pixel-IMS-Boolean-Fix.apk \
+            "$RUNNER_TEMP/app-aligned.apk"
+
+      - name: Verify signature and record build
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify \
+            --verbose --print-certs \
+            release-output/Pixel-IMS-Boolean-Fix.apk \
+            > release-output/signature-info.txt
+
+          git rev-parse HEAD > release-output/source-commit.txt
+
+          cd release-output
+          sha256sum Pixel-IMS-Boolean-Fix.apk > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pixel-IMS-Boolean-Fix-release
+          path: release-output/
+          if-no-files-found: error
+          retention-days: 30
