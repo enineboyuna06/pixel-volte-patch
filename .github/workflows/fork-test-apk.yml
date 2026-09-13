@@ -11,19 +11,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: fix-video-calls-boolean
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
+
       - uses: android-actions/setup-android@v3
+
       - name: Install Android SDK
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
       - name: Install hidden API android.jar
-        run: curl --fail --location --retry 3 https://github.com/Reginer/aosp-android-jar/raw/main/android-36/android.jar --output "$ANDROID_HOME/platforms/android-36/android.jar"
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Reginer/aosp-android-jar/raw/main/android-36/android.jar \
+            --output "$ANDROID_HOME/platforms/android-36/android.jar"
+
       - name: Build test APK
         run: bash ./gradlew :app:assembleDebug
+
       - name: Verify APK signature
-        run: '"$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk'
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose \
+            app/build/outputs/apk/debug/app-debug.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: Pixel-IMS-Boolean-Fix-test
